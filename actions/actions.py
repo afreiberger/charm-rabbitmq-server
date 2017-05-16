@@ -16,15 +16,22 @@
 
 import os
 import sys
+import subprocess
 
 sys.path.append('hooks/')
 
-from charmhelpers.core.hookenv import action_fail
+from charmhelpers.core.hookenv import (
+    action_set,
+    action_fail,
+)
+
 from rabbit_utils import (
     ConfigRenderer,
     CONFIG_FILES,
+    RABBITMQ_CTL,
     pause_unit_helper,
     resume_unit_helper,
+    list_vhosts,
 )
 
 
@@ -36,14 +43,62 @@ def pause(args):
 
 
 def resume(args):
-    """Resume the Ceilometer services.
+    """Resume the RabbitMQ services.
     @raises Exception should the service fail to start."""
     resume_unit_helper(ConfigRenderer(CONFIG_FILES))
 
 
+def vhost_queue_info(vhost):
+    try:
+        output = subprocess.check_output([RABBITMQ_CTL,
+                                          '-p', vhost, 'list_queues',
+                                          'name', 'messages', 'consumers'])
+    except subprocess.CalledProcessError as e:
+
+        # if no queues, just raises an exception
+        action_set({'output': e.output,
+                    'return-code': e.returncoder})
+        action_fail("Failed to query RabbitMQ vhost {} queues".format(vhost))
+        return []
+
+    queue_info = []
+    if '...done' in output:
+        queues = output.split('\n')[1:-2]
+    else:
+        queues = output.split('\n')[1:-1]
+
+    for queue in queues:
+        [qname, qmsgs, qconsumers] = queue.split()
+        queue_info.append({
+            'name': qname,
+            'messages': int(qmsgs),
+            'consumers': int(qconsumers)
+        })
+
+    return queue_info
+
+
+def list_unconsumed_queues(args):
+    """List queues which are unconsumed in RabbitMQ
+    @raises Exception should the service fail to start."""
+    count = 0
+    for vhost in list_vhosts():
+        iterator = 0
+        for queue in vhost_queue_info(vhost):
+            if queue['consumers'] == 0:
+                vhostqueue = "unconsumed-queues.{}.{}".format(vhost, iterator)
+                action_set({vhostqueue: "{} - {}".format(queue['name'],
+                                                         queue['messages'])})
+                iterator = iterator + 1
+                count = count + 1
+
+    action_set({'unconsumed-queue-count': count})
+
+
 # A dictionary of all the defined actions to callables (which take
 # parsed arguments).
-ACTIONS = {"pause": pause, "resume": resume}
+ACTIONS = {"pause": pause, "resume": resume,
+           "list-unconsumed-queues": list_unconsumed_queues}
 
 
 def main(args):

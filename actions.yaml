@@ -2,3 +2,11 @@ pause:
   description: Pause the rabbitmq unit.
 resume:
   descrpition: Resume the rabbitmq unit.
+list-unconsumed-queues:
+  description: |-
+      list queues which currently have zero consumers, results are like:
+        unconsumed-queue-count: "2"
+        unconsumed-queues:
+          $vhost:
+            "0": queue_name1 - 0
+            "1": $queue_name - $num_messages
